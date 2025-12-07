@@ -65,6 +65,17 @@ If you prefer to review the scripts before running, you can manually upload them
     ./generate-topology.sh
     ```
 
+#### Option C: Git Clone (For Developers)
+If you are comfortable with Git or want to contribute/modify the scripts.
+
+```bash
+git clone https://github.com/asomi7007/Azure-Resource-Topology-Auto-Generator.git
+cd Azure-Resource-Topology-Auto-Generator/scripts
+chmod +x generate-topology.sh
+./generate-topology.sh
+```
+
+
 ### 3. Download Result
 1.  Follow the script prompts to select your Subscription and Resource Group.
 2.  The script will generate a file named `topology.json`.
