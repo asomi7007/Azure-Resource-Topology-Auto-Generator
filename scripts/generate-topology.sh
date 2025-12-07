@@ -1,9 +1,7 @@
 #!/bin/bash
 
 # Azure Resource Topology Auto-Generator
-# Cloud Shell Script - Clean Rewrite v2.0
-
-# NO set -e to prevent bash quirks from crashing the script
+# Cloud Shell Script v2.1
 
 # Colors
 GREEN='\033[0;32m'
@@ -56,74 +54,82 @@ fi
 echo -e "Extension ready."
 echo ""
 
-# Step 3: Get Resource Groups
-echo -e "${GREEN}[Step 3/5] Fetching Resource Groups...${NC}"
+# Step 3: Get Resource Groups and Selection Loop
+while true; do
+    echo -e "${GREEN}[Step 3/5] Fetching Resource Groups...${NC}"
 
-# Read into array safely
-mapfile -t RG_LIST < <(az group list --query "[].name" -o tsv | sort)
-RG_COUNT=${#RG_LIST[@]}
+    # Read into array safely
+    mapfile -t RG_LIST < <(az group list --query "[].name" -o tsv | sort)
+    RG_COUNT=${#RG_LIST[@]}
 
-if [ "$RG_COUNT" -eq 0 ]; then
-    echo -e "${RED}No Resource Groups found in this subscription.${NC}"
-    exit 0
-fi
+    if [ "$RG_COUNT" -eq 0 ]; then
+        echo -e "${RED}No Resource Groups found in this subscription.${NC}"
+        exit 0
+    fi
 
-echo -e "Found ${BLUE}$RG_COUNT${NC} Resource Groups."
-echo ""
+    echo -e "Found ${BLUE}$RG_COUNT${NC} Resource Groups."
+    echo ""
 
-# Display list
-echo "Available Resource Groups:"
-echo "----------------------------"
-for i in "${!RG_LIST[@]}"; do
-    num=$((i+1))
-    printf "  [%2d] %s\n" "$num" "${RG_LIST[$i]}"
-done
-echo "----------------------------"
-echo ""
-
-# Selection prompt
-echo -e "${YELLOW}How to select:${NC}"
-echo -e "  - Enter numbers separated by space (e.g., '1 3 5')"
-echo -e "  - Enter 'all' to select all groups"
-echo -e "  - Press Enter without input to select all"
-echo ""
-
-read -p "Your selection: " USER_INPUT
-
-# Process selection
-SELECTED_RGS=()
-
-if [ -z "$USER_INPUT" ] || [ "$USER_INPUT" = "all" ]; then
-    # Select all
-    SELECTED_RGS=("${RG_LIST[@]}")
-    echo -e "${GREEN}Selected ALL ($RG_COUNT groups)${NC}"
-else
-    # Parse numbers
-    for num in $USER_INPUT; do
-        if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le "$RG_COUNT" ]; then
-            idx=$((num-1))
-            SELECTED_RGS+=("${RG_LIST[$idx]}")
-        fi
+    # Display list
+    echo "Available Resource Groups:"
+    echo "----------------------------"
+    for i in "${!RG_LIST[@]}"; do
+        num=$((i+1))
+        printf "  [%2d] %s\n" "$num" "${RG_LIST[$i]}"
     done
-fi
+    echo "----------------------------"
+    echo ""
 
-if [ ${#SELECTED_RGS[@]} -eq 0 ]; then
-    echo -e "${RED}No valid selection. Exiting.${NC}"
-    exit 0
-fi
+    # Selection prompt
+    echo -e "${YELLOW}How to select:${NC}"
+    echo -e "  - Enter numbers with comma (e.g., '1,3,5' or '1, 3, 5')"
+    echo -e "  - Enter 'all' to select all groups"
+    echo -e "  - Press Enter without input to select all"
+    echo ""
 
-echo ""
-echo -e "You selected ${BLUE}${#SELECTED_RGS[@]}${NC} group(s):"
-for rg in "${SELECTED_RGS[@]}"; do
-    echo -e "  - $rg"
+    read -p "Your selection: " USER_INPUT
+
+    # Process selection
+    SELECTED_RGS=()
+
+    if [ -z "$USER_INPUT" ] || [ "$USER_INPUT" = "all" ]; then
+        # Select all
+        SELECTED_RGS=("${RG_LIST[@]}")
+        echo -e "${GREEN}Selected ALL ($RG_COUNT groups)${NC}"
+    else
+        # Replace commas with spaces and parse numbers
+        USER_INPUT=${USER_INPUT//,/ }
+        for num in $USER_INPUT; do
+            if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le "$RG_COUNT" ]; then
+                idx=$((num-1))
+                SELECTED_RGS+=("${RG_LIST[$idx]}")
+            fi
+        done
+    fi
+
+    if [ ${#SELECTED_RGS[@]} -eq 0 ]; then
+        echo -e "${RED}No valid selection. Please try again.${NC}"
+        echo ""
+        continue
+    fi
+
+    echo ""
+    echo -e "You selected ${BLUE}${#SELECTED_RGS[@]}${NC} group(s):"
+    for rg in "${SELECTED_RGS[@]}"; do
+        echo -e "  - $rg"
+    done
+    echo ""
+
+    read -p "Continue with these groups? [Y/n]: " CONFIRM
+    if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
+        echo -e "${YELLOW}Going back to selection...${NC}"
+        echo ""
+        continue
+    fi
+
+    # User confirmed, break out of loop
+    break
 done
-echo ""
-
-read -p "Continue with these groups? [Y/n]: " CONFIRM
-if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
-    echo "Cancelled."
-    exit 0
-fi
 
 # Step 4: Query Resources
 echo ""
@@ -138,8 +144,17 @@ KQL_RGS=${KQL_RGS%,}  # Remove trailing comma
 
 QUERY="Resources | where resourceGroup in ($KQL_RGS) | project id, name, type, location, tags, properties"
 
-RAW_FILE="resources_raw.json"
-TOPOLOGY_FILE="topology.json"
+# Determine output directory - prefer clouddrive if available
+if [ -d "$HOME/clouddrive" ]; then
+    OUTPUT_DIR="$HOME/clouddrive"
+    echo -e "${GREEN}Saving files to Cloud Drive (File Share accessible)${NC}"
+else
+    OUTPUT_DIR="$HOME"
+    echo -e "${YELLOW}clouddrive not found, saving to home directory${NC}"
+fi
+
+RAW_FILE="$OUTPUT_DIR/resources_raw.json"
+TOPOLOGY_FILE="$OUTPUT_DIR/topology.json"
 
 echo -e "Running query..."
 az graph query -q "$QUERY" --first 1000 -o json > "$RAW_FILE" 2>/dev/null
@@ -173,8 +188,18 @@ if [ -f "$TOPOLOGY_FILE" ]; then
     echo ""
     echo -e "Topology file created: ${GREEN}$TOPOLOGY_FILE${NC}"
     echo ""
-    echo -e "To download this file to your computer, run:"
-    echo -e "  ${YELLOW}download $TOPOLOGY_FILE${NC}"
+    
+    if [ -d "$HOME/clouddrive" ]; then
+        echo -e "${GREEN}File is saved in your Cloud Drive!${NC}"
+        echo -e "You can download it from the Azure Portal:"
+        echo -e "  1. Click 'Manage files' icon in Cloud Shell toolbar"
+        echo -e "  2. Select 'Open file share'"
+        echo -e "  3. Navigate to 'cloudconsole' folder"
+        echo -e "  4. Download 'topology.json'"
+    else
+        echo -e "To download this file to your computer, run:"
+        echo -e "  ${YELLOW}download $TOPOLOGY_FILE${NC}"
+    fi
     echo ""
     echo -e "Then upload it to the server to generate your diagram."
 else
