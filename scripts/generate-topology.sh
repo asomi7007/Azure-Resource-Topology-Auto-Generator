@@ -1,204 +1,183 @@
 #!/bin/bash
 
 # Azure Resource Topology Auto-Generator
-# Cloud Shell Script (UX v3 - Interactive)
+# Cloud Shell Script - Clean Rewrite v2.0
 
-set -e
+# NO set -e to prevent bash quirks from crashing the script
 
-# --- Colors ---
+# Colors
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Clear screen for fresh start
-clear
-
+echo ""
 echo -e "${BLUE}=================================================${NC}"
-echo -e "${BLUE}   Azure Resource Topology Auto-Generator v1.4   ${NC}"
+echo -e "${BLUE}   Azure Resource Topology Auto-Generator        ${NC}"
 echo -e "${BLUE}=================================================${NC}"
 echo ""
 
-# 0. Dependencies (Always Force Update)
-PARSER_SCRIPT="parse-relations.py"
-echo -e "Updating helper script..."
-rm -f "$PARSER_SCRIPT" # Remove old version
-curl -s -O https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/parse-relations.py
+# Step 0: Force download latest helper script
+echo -e "${GREEN}[Setup] Downloading latest helper script...${NC}"
+curl -s -O "https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/parse-relations.py"
 
-# 1. Environment Check & Identity
-echo -e "${GREEN}[1/5] Checking Environment...${NC}"
-
-# Check Identity
-ACCOUNT_INFO=$(az account show -o json 2>/dev/null || echo "")
-if [ -z "$ACCOUNT_INFO" ]; then
-    echo -e "${YELLOW}Please login to Azure.${NC}"
-    az login -o table
-    # Retry getting account info after login
-    ACCOUNT_INFO=$(az account show -o json 2>/dev/null || echo "")
-fi
-
-if [ -n "$ACCOUNT_INFO" ]; then
-    USER_NAME=$(echo "$ACCOUNT_INFO" | jq -r '.user.name' 2>/dev/null || echo "User")
-    TENANT_ID=$(echo "$ACCOUNT_INFO" | jq -r '.tenantId' 2>/dev/null || echo "Unknown")
-    SUB_NAME=$(echo "$ACCOUNT_INFO" | jq -r '.name' 2>/dev/null || echo "Unknown")
-
-    echo -e "User: ${BLUE}$USER_NAME${NC}"
-    echo -e "Tenant: $TENANT_ID"
-    echo -e "Subscription: ${BLUE}$SUB_NAME${NC}"
-else
-    echo -e "${RED}[Error] Could not retrieve account info.${NC}"
+if [ ! -f "parse-relations.py" ]; then
+    echo -e "${RED}[Error] Failed to download parse-relations.py${NC}"
     exit 1
 fi
+echo -e "Helper script ready."
 echo ""
 
-# Extension Check
-az config set extension.use_dynamic_install=yes_without_prompt &> /dev/null
-if ! az extension show --name resource-graph &>/dev/null; then
-    echo -e "${YELLOW}Installing 'resource-graph' extension...${NC}"
-    az extension add --name resource-graph --allow-preview true &>/dev/null
+# Step 1: Check Azure CLI login
+echo -e "${GREEN}[Step 1/5] Checking Azure Login...${NC}"
+ACCOUNT_JSON=$(az account show -o json 2>/dev/null)
+
+if [ -z "$ACCOUNT_JSON" ]; then
+    echo -e "${YELLOW}Not logged in. Running az login...${NC}"
+    az login
+    ACCOUNT_JSON=$(az account show -o json 2>/dev/null)
 fi
 
-# 2. Resource Group Selection (Interactive)
-echo -e "${GREEN}[2/5] Fetching Resource Groups...${NC}"
-RGS=($(az group list --query "[].name" -o tsv | sort))
-COUNT=${#RGS[@]}
+USER_NAME=$(echo "$ACCOUNT_JSON" | jq -r '.user.name // "Unknown"')
+SUB_NAME=$(echo "$ACCOUNT_JSON" | jq -r '.name // "Unknown"')
+echo -e "Logged in as: ${BLUE}$USER_NAME${NC}"
+echo -e "Subscription: ${BLUE}$SUB_NAME${NC}"
+echo ""
 
-if [ "$COUNT" -eq 0 ]; then
-    echo -e "${RED}No Resource Groups found.${NC}"
+# Step 2: Check/Install resource-graph extension
+echo -e "${GREEN}[Step 2/5] Checking Azure Resource Graph extension...${NC}"
+az config set extension.use_dynamic_install=yes_without_prompt 2>/dev/null
+
+if ! az extension show --name resource-graph &>/dev/null; then
+    echo -e "${YELLOW}Installing resource-graph extension...${NC}"
+    az extension add --name resource-graph --allow-preview true 2>/dev/null
+fi
+echo -e "Extension ready."
+echo ""
+
+# Step 3: Get Resource Groups
+echo -e "${GREEN}[Step 3/5] Fetching Resource Groups...${NC}"
+
+# Read into array safely
+mapfile -t RG_LIST < <(az group list --query "[].name" -o tsv | sort)
+RG_COUNT=${#RG_LIST[@]}
+
+if [ "$RG_COUNT" -eq 0 ]; then
+    echo -e "${RED}No Resource Groups found in this subscription.${NC}"
     exit 0
 fi
 
-# Selection State Array (0=Unselected, 1=Selected)
-# Initialize all to 0
-declare -a STATES
-for ((i=0; i<COUNT; i++)); do STATES[$i]=0; done
+echo -e "Found ${BLUE}$RG_COUNT${NC} Resource Groups."
+echo ""
 
-# Helper function to print menu
-print_menu() {
-    clear
-    echo -e "${BLUE}=== Resource Group Selection ===${NC}"
-    echo -e "Total: $COUNT groups found."
-    echo "--------------------------------"
-    
-    for ((i=0; i<COUNT; i++)); do
-        display_idx=$((i+1))
-        if [ "${STATES[$i]}" -eq 1 ]; then
-            MARK="[*]"
-            COLOR=$GREEN
-        else
-            MARK="[ ]"
-            COLOR=$NC
-        fi
-        printf " %s %2d. ${COLOR}%s${NC}\n" "$MARK" "$display_idx" "${RGS[$i]}"
-    done
-    
-    echo "--------------------------------"
-    # Show currently selected list
-    echo -ne "Selected: "
-    SELECTED_COUNT=0
-    for ((i=0; i<COUNT; i++)); do
-        if [ "${STATES[$i]}" -eq 1 ]; then
-            if [ "$SELECTED_COUNT" -gt 0 ]; then echo -ne ", "; fi
-            echo -ne "${GREEN}${RGS[$i]}${NC}"
-            ((SELECTED_COUNT++))
-        fi
-    done
-    if [ "$SELECTED_COUNT" -eq 0 ]; then echo -ne "(None)"; fi
-    echo ""
-    echo "--------------------------------"
-    echo -e "Command Guide:"
-    echo -e " - ${YELLOW}Enter Number${NC} : Toggle selection"
-    echo -e " - ${YELLOW}Comma list${NC}   : Select multiple (e.g., 1,2,3)"
-    echo -e " - ${YELLOW}'0' or Enter${NC} : Select ALL (if nothing selected)"
-    echo -e " - ${YELLOW}'00'${NC}         : DONE / Finish Selection"
-    echo "--------------------------------"
-}
-
-# Initial Loop
-FIRST_PASS=true
-
-while true; do
-    print_menu
-    read -p "Your Choice > " CHOICE
-    
-    # Handle "00" -> Done
-    if [[ "$CHOICE" == "00" ]]; then
-        break
-    fi
-
-    # Handle Empty or '0' -> Select All (only if first pass or user wants to reset/select all?)
-    if [[ -z "$CHOICE" || "$CHOICE" == "0" ]]; then
-         # Select ALL
-         for ((i=0; i<COUNT; i++)); do STATES[$i]=1; done
-         continue
-    fi
-
-    # Handle Comma Separated (e.g. 1, 2, 3)
-    # Replace commas with spaces
-    CHOICE=${CHOICE//,/ }
-    
-    for num in $CHOICE; do
-        if [[ "$num" =~ ^[0-9]+$ ]]; then
-            idx=$((num-1))
-            if [ "$idx" -ge 0 ] && [ "$idx" -lt "$COUNT" ]; then
-                # Toggle
-                if [ "${STATES[$idx]}" -eq 1 ]; then
-                    STATES[$idx]=0
-                else
-                    STATES[$idx]=1
-                fi
-            fi
-        fi
-    done
+# Display list
+echo "Available Resource Groups:"
+echo "----------------------------"
+for i in "${!RG_LIST[@]}"; do
+    num=$((i+1))
+    printf "  [%2d] %s\n" "$num" "${RG_LIST[$i]}"
 done
+echo "----------------------------"
+echo ""
 
-# Build Final List
+# Selection prompt
+echo -e "${YELLOW}How to select:${NC}"
+echo -e "  - Enter numbers separated by space (e.g., '1 3 5')"
+echo -e "  - Enter 'all' to select all groups"
+echo -e "  - Press Enter without input to select all"
+echo ""
+
+read -p "Your selection: " USER_INPUT
+
+# Process selection
 SELECTED_RGS=()
-for ((i=0; i<COUNT; i++)); do
-    if [ "${STATES[$i]}" -eq 1 ]; then
-        SELECTED_RGS+=("${RGS[$i]}")
-    fi
-done
+
+if [ -z "$USER_INPUT" ] || [ "$USER_INPUT" = "all" ]; then
+    # Select all
+    SELECTED_RGS=("${RG_LIST[@]}")
+    echo -e "${GREEN}Selected ALL ($RG_COUNT groups)${NC}"
+else
+    # Parse numbers
+    for num in $USER_INPUT; do
+        if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le "$RG_COUNT" ]; then
+            idx=$((num-1))
+            SELECTED_RGS+=("${RG_LIST[$idx]}")
+        fi
+    done
+fi
 
 if [ ${#SELECTED_RGS[@]} -eq 0 ]; then
-    echo -e "${RED}No groups selected. Exiting.${NC}"
+    echo -e "${RED}No valid selection. Exiting.${NC}"
     exit 0
 fi
 
-# 3. Data Collection
 echo ""
-echo -e "${GREEN}[3/5] Scanning ${#SELECTED_RGS[@]} Groups...${NC}"
+echo -e "You selected ${BLUE}${#SELECTED_RGS[@]}${NC} group(s):"
+for rg in "${SELECTED_RGS[@]}"; do
+    echo -e "  - $rg"
+done
+echo ""
 
-KQL_LIST=""
-for s_rg in "${SELECTED_RGS[@]}"; do KQL_LIST+="'$s_rg',"; done
-KQL_LIST=${KQL_LIST%,}
+read -p "Continue with these groups? [Y/n]: " CONFIRM
+if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
+    echo "Cancelled."
+    exit 0
+fi
 
-QUERY="Resources | where resourceGroup in ($KQL_LIST) | project id, name, type, location, tags, properties | order by name asc"
+# Step 4: Query Resources
+echo ""
+echo -e "${GREEN}[Step 4/5] Querying Azure Resources...${NC}"
+
+# Build KQL filter
+KQL_RGS=""
+for rg in "${SELECTED_RGS[@]}"; do
+    KQL_RGS+="'$rg',"
+done
+KQL_RGS=${KQL_RGS%,}  # Remove trailing comma
+
+QUERY="Resources | where resourceGroup in ($KQL_RGS) | project id, name, type, location, tags, properties"
+
 RAW_FILE="resources_raw.json"
 TOPOLOGY_FILE="topology.json"
 
-az graph query -q "$QUERY" -o json > "$RAW_FILE"
-COUNT_RES=$(jq 'length' "$RAW_FILE" 2>/dev/null || echo "0")
-echo -e "Found ${BLUE}$COUNT_RES${NC} resources."
+echo -e "Running query..."
+az graph query -q "$QUERY" --first 1000 -o json > "$RAW_FILE" 2>/dev/null
 
-if [ "$COUNT_RES" -eq 0 ]; then
-    echo -e "${YELLOW}No resources found.${NC}"
+if [ ! -f "$RAW_FILE" ]; then
+    echo -e "${RED}Failed to query resources.${NC}"
+    exit 1
+fi
+
+# Count resources (handle az graph output format which wraps in { data: [...] })
+RAW_COUNT=$(jq '.data | length' "$RAW_FILE" 2>/dev/null || jq 'length' "$RAW_FILE" 2>/dev/null || echo "0")
+echo -e "Found ${BLUE}$RAW_COUNT${NC} resources."
+
+if [ "$RAW_COUNT" = "0" ]; then
+    echo -e "${YELLOW}No resources found in selected groups.${NC}"
     exit 0
 fi
 
-# 4. Generate Topology
+# Step 5: Generate Topology
 echo ""
-echo -e "${GREEN}[4/5] Generating Topology...${NC}"
-RG_STR=$(IFS=,; echo "${SELECTED_RGS[*]}")
-python3 "$PARSER_SCRIPT" "$RAW_FILE" "$TOPOLOGY_FILE" --rg "$RG_STR"
+echo -e "${GREEN}[Step 5/5] Generating Topology JSON...${NC}"
 
-echo -e "${BLUE}Done! '$TOPOLOGY_FILE' created.${NC}"
+RG_STRING=$(IFS=','; echo "${SELECTED_RGS[*]}")
+python3 parse-relations.py "$RAW_FILE" "$TOPOLOGY_FILE" --rg "$RG_STRING"
 
-# 5. Instructions
-echo ""
-echo -e "${GREEN}[5/5] Next Steps${NC}"
-echo -e "1. Download: ${YELLOW}download topology.json${NC}"
-echo "2. Upload to server."
-
-echo ""
+if [ -f "$TOPOLOGY_FILE" ]; then
+    echo ""
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${BLUE}   SUCCESS!                                      ${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    echo ""
+    echo -e "Topology file created: ${GREEN}$TOPOLOGY_FILE${NC}"
+    echo ""
+    echo -e "To download this file to your computer, run:"
+    echo -e "  ${YELLOW}download $TOPOLOGY_FILE${NC}"
+    echo ""
+    echo -e "Then upload it to the server to generate your diagram."
+else
+    echo -e "${RED}Failed to generate topology file.${NC}"
+    exit 1
+fi
