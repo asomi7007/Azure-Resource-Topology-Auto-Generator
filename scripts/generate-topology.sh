@@ -1,80 +1,84 @@
 #!/bin/bash
 
 # Azure Resource Topology Auto-Generator
-# Cloud Shell Script (Enhanced UX)
+# Cloud Shell Script (Enhanced UX v2)
 
 set -e
 
-# --- Helper Colors ---
+# --- Colors ---
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
+clear
 echo -e "${BLUE}=================================================${NC}"
-echo -e "${BLUE}   Azure Resource Topology Auto-Generator v1.2   ${NC}"
+echo -e "${BLUE}   Azure Resource Topology Auto-Generator v1.3   ${NC}"
 echo -e "${BLUE}=================================================${NC}"
 echo ""
 
-# 0. Auto-download dependency if missing
+# 0. Dependencies
 PARSER_SCRIPT="parse-relations.py"
 if [ ! -f "$PARSER_SCRIPT" ]; then
-    echo -e "${YELLOW}[Init] Downloading dependency: $PARSER_SCRIPT...${NC}"
+    echo -e "Downloading helper script..."
     curl -s -O https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/parse-relations.py
 fi
 
-# 1. Prerequisite Checks & Config
-echo -e "${GREEN}[Step 1/5] Checking Environment...${NC}"
+# 1. Environment Check
+echo -e "${GREEN}[1/5] Checking Environment & Identity...${NC}"
 
-# Auto-configure extension installation to prevent hanging
-# This suppresses prompts for 'resource-graph' extension installation
-az config set extension.use_dynamic_install=yes_without_prompt &> /dev/null
-az config set extension.dynamic_install_allow_preview=true &> /dev/null
-
-if ! command -v az &> /dev/null; then
-    echo -e "${RED}[Error] 'az' command not found. Run this in Azure Cloud Shell.${NC}"
-    exit 1
-fi
-
-if ! command -v python3 &> /dev/null; then
-    echo -e "${RED}[Error] 'python3' command not found.${NC}"
-    exit 1
-fi
-
-# 2. Select Subscription
-echo -e "${GREEN}[Step 2/5] Selecting Subscription...${NC}"
-CURRENT_SUB=$(az account show --query "name" -o tsv 2>/dev/null || echo "")
-
-if [ -z "$CURRENT_SUB" ]; then
-    echo -e "${YELLOW}Please login to Azure.${NC}"
+# 1.1 Check Identity
+ACCOUNT_INFO=$(az account show -o json 2>/dev/null || echo "")
+if [ -z "$ACCOUNT_INFO" ]; then
+    echo -e "${YELLOW}You are not logged in.${NC}"
     az login -o table
-    CURRENT_SUB=$(az account show --query "name" -o tsv)
+    ACCOUNT_INFO=$(az account show -o json)
 fi
-echo -e "Current Subscription: ${BLUE}$CURRENT_SUB${NC}"
+
+USER_NAME=$(echo "$ACCOUNT_INFO" | jq -r '.user.name')
+TENANT_ID=$(echo "$ACCOUNT_INFO" | jq -r '.tenantId')
+SUB_NAME=$(echo "$ACCOUNT_INFO" | jq -r '.name')
+
+echo -e "Hello, ${BLUE}$USER_NAME${NC}!"
+echo -e "Tenant ID: $TENANT_ID"
+echo -e "Subscription: ${BLUE}$SUB_NAME${NC}"
 echo ""
 
-# 3. Select Resource Groups (Multi-Select)
-echo -e "${GREEN}[Step 3/5] Fetching Resource Groups...${NC}"
-# Get list of RGs as "Name"
+# 1.2 Check Extensions
+echo -e "Checking required extensions..."
+# Configure auto-install to be silent just in case, but we try to be explicit first
+az config set extension.use_dynamic_install=yes_without_prompt &> /dev/null
+
+if ! az extension show --name resource-graph &>/dev/null; then
+    echo -e "${YELLOW}Extension 'resource-graph' is missing. Installing now...${NC}"
+    az extension add --name resource-graph --allow-preview true &>/dev/null
+    echo -e "Extension installed."
+else
+    echo -e "Extension 'resource-graph' is ready."
+fi
+echo ""
+
+# 2. Select Resource Groups
+echo -e "${GREEN}[2/5] Fetching Resource Groups in '$SUB_NAME'...${NC}"
 RGS=($(az group list --query "[].name" -o tsv | sort))
 
 if [ ${#RGS[@]} -eq 0 ]; then
-    echo -e "${RED}[Error] No Resource Groups found.${NC}"
+    echo -e "${RED}No Resource Groups found. Exiting.${NC}"
     exit 0
 fi
 
-echo "Available Resource Groups:"
+# Limit display if too many?
 i=1
 for rg in "${RGS[@]}"; do
-    echo "  [$i] $rg"
+    printf "  [%2d] %s\n" "$i" "$rg"
     ((i++))
 done
 
 echo ""
-echo -e "${YELLOW}Enter the numbers of the Resource Groups to scan.${NC}"
-echo -e "${YELLOW}Examples: '1' or '1 3 5' or 'all'${NC}"
-read -p "Selection: " SELECTION
+echo -e "${YELLOW}Select Groups (e.g. '1', '1 3', 'all')${NC}"
+read -p "Selection [Default: all]: " SELECTION
+SELECTION=${SELECTION:-all} # Default to all
 
 SELECTED_RGS=()
 if [[ "$SELECTION" == "all" ]]; then
@@ -89,82 +93,62 @@ else
 fi
 
 if [ ${#SELECTED_RGS[@]} -eq 0 ]; then
-    echo -e "${RED}[Error] No valid selection made. Exiting.${NC}"
+    echo -e "${RED}Invalid selection. Exiting.${NC}"
     exit 1
 fi
 
 echo ""
-echo -e "You selected ${#SELECTED_RGS[@]} Resource Group(s):"
-for s_rg in "${SELECTED_RGS[@]}"; do
-    echo -e " - ${BLUE}$s_rg${NC}"
-done
+echo -e "Target: ${BLUE}${#SELECTED_RGS[@]} Resource Group(s)${NC}"
+if [ ${#SELECTED_RGS[@]} -le 5 ]; then
+    for s_rg in "${SELECTED_RGS[@]}"; do echo " - $s_rg"; done
+fi
 
-echo ""
-read -p "Are you sure you want to proceed? (y/n): " CONFIRM
-if [[ "$CONFIRM" != "y" && "$CONFIRM" != "Y" ]]; then
-    echo "Operation cancelled."
+read -p "Proceed with scan? [Y/n]: " CONFIRM
+CONFIRM=${CONFIRM:-Y} # Default Yes
+
+if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
+    echo "Cancelled."
     exit 0
 fi
 
-# 4. Data Collection (Batch Query)
+# 3. Data Collection
 echo ""
-echo -e "${GREEN}[Step 4/5] Collecting Resource Data...${NC}"
+echo -e "${GREEN}[3/5] Scanning Resources...${NC}"
 
-# Build KQL "in" clause: ('rg1', 'rg2')
 KQL_LIST=""
-for s_rg in "${SELECTED_RGS[@]}"; do
-    KQL_LIST+="'$s_rg',"
-done
-# Remove trailing comma
+for s_rg in "${SELECTED_RGS[@]}"; do KQL_LIST+="'$s_rg',"; done
 KQL_LIST=${KQL_LIST%,}
 
-# Query definition
-# Querying multiple RGs at once
-echo -e "Querying Azure Resource Graph..."
-QUERY="Resources 
-| where resourceGroup in ($KQL_LIST) 
-| project id, name, type, location, tags, properties 
-| order by name asc"
-
+QUERY="Resources | where resourceGroup in ($KQL_LIST) | project id, name, type, location, tags, properties | order by name asc"
 RAW_FILE="resources_raw.json"
 TOPOLOGY_FILE="topology.json"
 
-# Run query
 az graph query -q "$QUERY" -o json > "$RAW_FILE"
-
 COUNT=$(jq 'length' "$RAW_FILE" 2>/dev/null || echo "0")
-echo -e "${BLUE}Success! Collected $COUNT resources.${NC}"
+echo -e "Found ${BLUE}$COUNT${NC} resources."
 
 if [ "$COUNT" -eq 0 ]; then
-    echo -e "${YELLOW}[Warning] No resources found in selected groups.${NC}"
+    echo -e "${YELLOW}No resources to map. Exiting.${NC}"
     exit 0
 fi
 
-# 5. Process Relationships
+# 4. Generate Topology
 echo ""
-echo -e "${GREEN}[Step 5/5] Analyzing Relationships & Generating Topology...${NC}"
+echo -e "${GREEN}[4/5] Generating Topology...${NC}"
+# Pass RGs just for info
+RG_STR=$(IFS=,; echo "${SELECTED_RGS[*]}")
+python3 "$PARSER_SCRIPT" "$RAW_FILE" "$TOPOLOGY_FILE" --rg "$RG_STR"
 
-if [ -f "$PARSER_SCRIPT" ]; then
-    # We pass the list of RGs just for metadata, though parser uses the raw file mostly
-    # Joining RGs with comma for display/arg
-    RG_STR=$(IFS=,; echo "${SELECTED_RGS[*]}")
-    
-    python3 "$PARSER_SCRIPT" "$RAW_FILE" "$TOPOLOGY_FILE" --rg "$RG_STR"
-    echo -e "${BLUE}Topology JSON generated successfully: $TOPOLOGY_FILE${NC}"
-else
-    echo -e "${RED}[Error] Parser script missing. Cannot generate topology.${NC}"
-    exit 1
-fi
+echo -e "${BLUE}Success! Created '$TOPOLOGY_FILE'.${NC}"
 
-# 6. Final Instructions
+
+# 5. Download Instructions
 echo ""
-echo -e "${BLUE}=================================================${NC}"
-echo -e "${BLUE}                 COMPLETED                       ${NC}"
-echo -e "${BLUE}=================================================${NC}"
+echo -e "${GREEN}[5/5] Next Steps${NC}"
+echo "We are done here. To generate the diagram:"
+echo "1. Download the file:"
+echo -e "   ${YELLOW}download $TOPOLOGY_FILE${NC}"
+echo "2. Upload it to the server."
+
+# Clean exit
 echo ""
-echo "Your topology file is ready: 'topology.json'"
-echo ""
-echo "To download it to your local machine, run:"
-echo -e "${GREEN}download topology.json${NC}"
-echo ""
-echo "Then upload it to the server to verify the changes."
