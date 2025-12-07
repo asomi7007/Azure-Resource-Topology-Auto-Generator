@@ -20,12 +20,11 @@ echo -e "${BLUE}   Azure Resource Topology Auto-Generator v1.4   ${NC}"
 echo -e "${BLUE}=================================================${NC}"
 echo ""
 
-# 0. Dependencies
+# 0. Dependencies (Always Force Update)
 PARSER_SCRIPT="parse-relations.py"
-if [ ! -f "$PARSER_SCRIPT" ]; then
-    echo -e "Downloading helper script..."
-    curl -s -O https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/parse-relations.py
-fi
+echo -e "Updating helper script..."
+rm -f "$PARSER_SCRIPT" # Remove old version
+curl -s -O https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/parse-relations.py
 
 # 1. Environment Check & Identity
 echo -e "${GREEN}[1/5] Checking Environment...${NC}"
