@@ -9,13 +9,42 @@ def main():
     parser.add_argument('--rg', help='Resource Group Name', required=True)
     args = parser.parse_args()
 
+    # Load raw resources with robust handling
     try:
         with open(args.input_file, 'r', encoding='utf-8') as f:
-            resources = json.load(f)
-    except FileNotFoundError:
-        print(f"Error: Input file {args.input_file} not found.")
+            data = json.load(f)
+            
+        # Handle case where output might be wrapped or single object
+        if isinstance(data, list):
+            resources = data
+        elif isinstance(data, dict):
+            # Sometimes single object or dictionary wrapper
+            if 'data' in data and isinstance(data['data'], list):
+                resources = data['data']
+            else:
+                resources = [data]
+        else:
+            print(f"[Error] content is not a list/dict: {type(data)}")
+            resources = []
+
+    except Exception as e:
+        print(f"[Error] Failed to load JSON: {e}")
+        # Create empty topology so flow doesn't break entirely? Or exit?
+        # Exit is better to show error.
         sys.exit(1)
 
+    # Validate resource structure
+    valid_resources = []
+    for r in resources:
+        if isinstance(r, dict) and 'id' in r:
+            valid_resources.append(r)
+        else:
+            # Skip invalid entries (could be strings or malformed objects)
+            continue
+    
+    resources = valid_resources
+    
+    # Init Topology
     topology = {
         "resourceGroup": args.rg,
         "resources": [],
@@ -25,21 +54,17 @@ def main():
     # Helper: Search resource by ID
     # In a large set, a dict map is faster
     resource_map = {r['id'].lower(): r for r in resources}
+    print(f"Loaded {len(resources)} valid resources.")
     
     # 1. Process Resources
-    # We keep the raw data but simplify/structure it for the frontend/engine if needed
-    # For now, just pass through or slight cleanup
     for r in resources:
         # Simplify Type for easier icon mapping later
-        # e.g., Microsoft.Network/virtualNetworks -> virtualNetworks
-        
         node = {
             "id": r['id'],
             "name": r['name'],
             "type": r['type'],
             "location": r['location'],
             "tags": r.get('tags', {}),
-            # We assume properties exists, but handle cases where it might be missing
             "properties": r.get('properties', {}) 
         }
         topology["resources"].append(node)
@@ -74,9 +99,9 @@ def main():
                             "location": r['location'],
                             "properties": sn.get('properties', {})
                         }
+                        # Check if already added
                         if not any(x['id'].lower() == sn_id.lower() for x in topology['resources']):
                             topology['resources'].append(sub_node)
-
 
         # --- Rule: Subnet -> NIC (Physical/Membership) ---
         if rtype == 'microsoft.network/networkinterfaces':
@@ -109,16 +134,6 @@ def main():
                     })
 
         # --- Rule: Subnet -> NSG (Logical/Association) ---
-        if rtype == 'microsoft.network/virtualnetworks/subnets' or (rtype == 'microsoft.network/virtualnetworks' and 'subnets' in props):
-            # Note: Subnets object handling is tricky if it's main resource vs child property.
-            # Assuming we are iterating main resources. If subnet is not main resource, we check VNet above.
-            # However, if NSG is linked, we usually see it on the Subnet object in Graph.
-            # Let's check NSG -> Subnet reverse or Subnet -> NSG.
-            pass
-
-        # Check NSG/RouteTable on parsed Subnet nodes if we missed them?
-        # Simpler: Iterate NSGs and find where they are attached?
-        # NSG properties usually show 'subnets' or 'networkInterfaces' references.
         if rtype == 'microsoft.network/networksecuritygroups':
             # NSG -> Subnet
             associated_subnets = props.get('subnets', [])
@@ -144,9 +159,6 @@ def main():
 
         # --- Rule: Traffic Flow (LB -> Pool -> VM) ---
         if rtype == 'microsoft.network/loadbalancers' or rtype == 'microsoft.network/applicationgateways':
-            # FrontendIP -> LB (Ingress)
-            # We omit FrontendIP resource for now to keep it simple, or link PublicIP -> LB
-            
             # LB -> BackendPool (Internal Containment or Flow?)
             bepools = props.get('backendAddressPools', [])
             for pool in bepools:
