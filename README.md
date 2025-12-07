@@ -40,16 +40,16 @@ This tool generates the topology data using a shell script, so you **MUST use th
     ![Create Storage](docs/images/cloud-shell-create-storage.png)
 
 ### 2. Run Generation Script (One-Liner)
-Instead of uploading files manually, just copy and paste the command below into your Cloud Shell terminal. It will download the necessary scripts and run them automatically.
 
-**(Click the Copy icon in the top-right of the code block below)**
+1.  **Open Cloud Shell**:
+    [![Open in Cloud Shell](https://img.shields.io/static/v1?label=Azure&message=Open+Cloud+Shell&color=0078D4&logo=microsoftazure)](https://shell.azure.com)
 
-```bash
-curl -O https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/generate-topology.sh && \
-curl -O https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/parse-relations.py && \
-chmod +x generate-topology.sh && \
-./generate-topology.sh
-```
+2.  **Execute Command**:
+    Just copy and paste the line below. It will download dependencies and run the generator automatically.
+
+    ```bash
+    bash <(curl -s https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/generate-topology.sh)
+    ```
 
 ### 3. Download Result
 1.  Follow the script prompts to select your Subscription and Resource Group.
