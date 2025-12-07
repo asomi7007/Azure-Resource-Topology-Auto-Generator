@@ -39,35 +39,33 @@ This tool generates the topology data using a shell script, so you **MUST use th
     *   Select "Create new storage account" (Microsoft에서 사용자의 스토리지 계정을 만듭니다).
     ![Create Storage](docs/images/cloud-shell-create-storage.png)
 
-### 2. Run Generation Script
-1.  **Upload Scripts**:
-    *   In the Cloud Shell toolbar, click the **"Manage files"** icon -> **"Open file share"** (또는 "Upload/Download").
-    *   Upload `scripts/generate-topology.sh` and `scripts/parse-relations.py` from this repository.
-    ![File Share](docs/images/cloud-shell-file-share.png)
+### 2. Run Generation Script (One-Liner)
+Instead of uploading files manually, just copy and paste the command below into your Cloud Shell terminal. It will download the necessary scripts and run them automatically.
 
-2.  **Execute Command**:
-    Copy and paste the following command into your Cloud Shell terminal:
+**(Click the Copy icon in the top-right of the code block below)**
 
+```bash
+curl -O https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/generate-topology.sh && \
+curl -O https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/parse-relations.py && \
+chmod +x generate-topology.sh && \
+./generate-topology.sh
+```
+
+### 3. Download Result
+1.  Follow the script prompts to select your Subscription and Resource Group.
+2.  The script will generate a file named `topology.json`.
+3.  Type `download topology.json` in the terminal to save it to your local computer.
+
+### 4. Generate Diagram (server)
+1.  **Clone & Run Local Server**:
     ```bash
-    # Give execution permission
-    chmod +x generate-topology.sh
-    
-    # Run the script
-    ./generate-topology.sh
-    ```
-
-3.  **Download Result**:
-    *   Follow the script prompts to select your Subscription and Resource Group.
-    *   The script will generate a file named `topology.json`.
-    *   Type `download topology.json` in the terminal to save it to your local computer.
-
-### 3. Generate Diagram (server)
-1.  Start the local server:
-    ```bash
+    git clone https://github.com/asomi7007/Azure-Resource-Topology-Auto-Generator.git
+    cd Azure-Resource-Topology-Auto-Generator
+    python -m venv venv
+    venv\Scripts\activate  # Mac/Linux: source venv/bin/activate
+    pip install -r server/requirements.txt
     python server/main.py
     ```
 2.  Open `http://localhost:8000` in your browser.
-3.  Upload the `topology.json` file you downloaded.
-4.  **Download your Topology**:
-    *   **PPTX**: Editable PowerPoint file with icons.
-    *   **PNG**: High-resolution image.
+3.  Upload the `topology.json` file.
+4.  **Download your Topology** (PPTX / PNG).
