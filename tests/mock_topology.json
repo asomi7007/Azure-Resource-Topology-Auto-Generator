@@ -1,0 +1,57 @@
+{
+    "resourceGroup": "demo-rg",
+    "resources": [
+        {
+            "id": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Network/virtualNetworks/demo-vnet",
+            "name": "demo-vnet",
+            "type": "Microsoft.Network/virtualNetworks",
+            "location": "koreacentral",
+            "properties": {}
+        },
+        {
+            "id": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Network/virtualNetworks/demo-vnet/subnets/frontend-subnet",
+            "name": "frontend-subnet",
+            "type": "Microsoft.Network/virtualNetworks/subnets",
+            "location": "koreacentral",
+            "properties": {}
+        },
+        {
+            "id": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Network/networkInterfaces/web-nic",
+            "name": "web-nic",
+            "type": "Microsoft.Network/networkInterfaces",
+            "location": "koreacentral",
+            "properties": {}
+        },
+        {
+            "id": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Compute/virtualMachines/web-vm01",
+            "name": "web-vm01",
+            "type": "Microsoft.Compute/virtualMachines",
+            "location": "koreacentral",
+            "properties": {}
+        },
+        {
+            "id": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Network/loadBalancers/app-lb",
+            "name": "app-lb",
+            "type": "Microsoft.Network/loadBalancers",
+            "location": "koreacentral",
+            "properties": {}
+        }
+    ],
+    "relationships": [
+        {
+            "from": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Network/virtualNetworks/demo-vnet",
+            "to": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Network/virtualNetworks/demo-vnet/subnets/frontend-subnet",
+            "type": "Contains"
+        },
+        {
+            "from": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Network/virtualNetworks/demo-vnet/subnets/frontend-subnet",
+            "to": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Network/networkInterfaces/web-nic",
+            "type": "Attached"
+        },
+        {
+            "from": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Network/networkInterfaces/web-nic",
+            "to": "/subscriptions/sub1/resourceGroups/demo-rg/providers/Microsoft.Compute/virtualMachines/web-vm01",
+            "type": "NICAttachedToVM"
+        }
+    ]
+}
