@@ -39,22 +39,39 @@ This tool generates the topology data using a shell script, so you **MUST use th
     *   Select "Create new storage account" (Microsoft에서 사용자의 스토리지 계정을 만듭니다).
     ![Create Storage](docs/images/cloud-shell-create-storage.png)
 
-### 2. Run Generation Script (One-Liner)
+### 2. Run Generation Script
 
-1.  **Open Cloud Shell**:
-    [![Open in Cloud Shell](https://img.shields.io/static/v1?label=Azure&message=Open+Cloud+Shell&color=0078D4&logo=microsoftazure)](https://shell.azure.com)
+You can choose one of the following methods to run the script.
 
+#### Option A: One-Liner (Recommended)
+Just copy and paste the line below into your Cloud Shell terminal. It will download the necessary scripts and run them automatically.
+
+1.  **Open Cloud Shell**: [![Open in Cloud Shell](https://img.shields.io/static/v1?label=Azure&message=Open+Cloud+Shell&color=0078D4&logo=microsoftazure)](https://shell.azure.com)
 2.  **Execute Command**:
-    Just copy and paste the line below. It will download dependencies and run the generator automatically.
-
     ```bash
     bash <(curl -s https://raw.githubusercontent.com/asomi7007/Azure-Resource-Topology-Auto-Generator/master/scripts/generate-topology.sh)
+    ```
+
+#### Option B: Manual Upload
+If you prefer to review the scripts before running, you can manually upload them.
+
+1.  **Download Scripts**: Download `scripts/generate-topology.sh` and `scripts/parse-relations.py` from this repository to your PC.
+2.  **Upload to Cloud Shell**:
+    *   Click the **"Manage files"** icon -> **"Upload"**.
+    ![File Share](docs/images/cloud-shell-file-share.png)
+3.  **Run**:
+    ```bash
+    chmod +x generate-topology.sh
+    ./generate-topology.sh
     ```
 
 ### 3. Download Result
 1.  Follow the script prompts to select your Subscription and Resource Group.
 2.  The script will generate a file named `topology.json`.
-3.  Type `download topology.json` in the terminal to save it to your local computer.
+3.  **Download the file**:
+    *   Type `download topology.json` in the terminal to save it to your local computer.
+    *   Alternatively, use the **"Manage files"** menu -> **"Download"**.
+    ![File Share](docs/images/cloud-shell-file-share.png)
 
 ### 4. Generate Diagram (server)
 1.  **Clone & Run Local Server**:
